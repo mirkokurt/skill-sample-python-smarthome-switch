@@ -104,6 +104,104 @@ class AlexaResponse:
             capability['properties']['supported'] = supported
             capability['properties']['proactivelyReported'] = kwargs.get('proactively_reported', False)
             capability['properties']['retrievable'] = kwargs.get('retrievable', False)
+
+        multi = kwargs.get('multi', None)    
+        if multi:
+            capability['properties']['nonControllable'] = False
+            capability['instance'] = "Projector.Position"
+            capability_resources = {
+                "friendlyNames": [
+                  {
+                    "@type": "asset",
+                    "value": {
+                      "assetId": "Projector.Position"
+                    }
+                  },
+                  {
+                    "@type": "text",
+                    "value": {
+                      "text": "Projector",
+                      "locale": "en-US"
+                    }
+                  },
+                  {
+                    "@type": "text",
+                    "value": {
+                      "text": "Proiettore",
+                      "locale": "it-IT"
+                    }
+                  }
+                ]
+              }
+            capability['capabilityResources'] = capability_resources
+            configuration =  {
+                "ordered": False,
+                "supportedModes": [
+                  {
+                    "value": "Position.Up",
+                    "modeResources": {
+                      "friendlyNames": [
+                        {
+                          "@type": "asset",
+                          "value": {
+                            "assetId": "Alexa.Value.Open"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "value": "Position.Down",
+                    "modeResources": {
+                      "friendlyNames": [
+                        {
+                          "@type": "asset",
+                          "value": {
+                            "assetId": "Alexa.Value.Close"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            capability['configuration'] = configuration
+            capability['semantics'] =  {
+                "actionMappings": [
+                  {
+                    "@type": "ActionsToDirective",
+                    "actions": ["Alexa.Actions.Close", "Alexa.Actions.Lower"],
+                    "directive": {
+                      "name": "SetMode",
+                      "payload": {
+                        "mode": "Position.Down"
+                      }
+                    }
+                  },
+                  {
+                    "@type": "ActionsToDirective",
+                    "actions": ["Alexa.Actions.Open", "Alexa.Actions.Raise"],
+                    "directive": {
+                      "name": "SetMode",
+                      "payload": {
+                        "mode": "Position.Up"
+                      }
+                    }
+                  }
+                ],
+                "stateMappings": [
+                  {
+                    "@type": "StatesToValue",
+                    "states": ["Alexa.States.Closed"],
+                    "value": "Position.Down"
+                  },
+                  {
+                    "@type": "StatesToValue",
+                    "states": ["Alexa.States.Open"],
+                    "value": "Position.Up"
+                  }  
+                ]
+              }
         return capability
 
     def get(self, remove_empty=True):

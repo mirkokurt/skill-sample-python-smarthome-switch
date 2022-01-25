@@ -16,6 +16,7 @@ import json
 import paho.mqtt.client as paho
 from alexa.skills.smarthome import AlexaResponse
 import time
+import uuid
 
 aws_dynamodb = boto3.client('dynamodb')
 
@@ -74,16 +75,25 @@ def lambda_handler(request, context):
             capability_alexa_brightnesscontroller = adr.create_payload_endpoint_capability(
                 interface='Alexa.BrightnessController',
                 supported=[{'name': 'brightness'}])
+            capability_alexa_modecontroller = adr.create_payload_endpoint_capability(
+                interface='Alexa.ModeController',
+                supported=[{'name': 'mode'}],
+                multi=True)
             for key, value in objs.items():
-                if not value['type'] == 'binary-output' and not value['type'] == 'analog-output':
+                if not value['type'] == 'binary-output' and not value['type'] == 'analog-output' and not value['type'] == 'multi-state-output':
                     continue
                 capab = []
+                display_cat = ['SWITCH']
                 if value['type'] == 'binary-output':
                     capab=[capability_alexa, capability_alexa_powercontroller]
                 elif value['type'] == 'analog-output':
                     capab=[capability_alexa, capability_alexa_powercontroller, capability_alexa_brightnesscontroller]
+                    display_cat = ['LIGHT']
+                elif value['type'] == 'multi-state-output':
+                    capab=[capability_alexa, capability_alexa_modecontroller]
+                    display_cat = ["INTERIOR_BLIND"]
                 adr.add_payload_endpoint(
-                    display_categories=['LIGHT'],
+                    display_categories=display_cat,
                     friendly_name=str(value['properties']['description']).replace("b", "").replace("'", ""),
                     description="test",
                     manufacturer_name="Sauter",
@@ -94,6 +104,7 @@ def lambda_handler(request, context):
     if namespace == 'Alexa.PowerController':
         # Note: This sample always returns a success response for either a request to TurnOff or TurnOn
         endpoint_id = request['directive']['endpoint']['endpointId']
+        print(endpoint_id)
         power_state_value = 'OFF' if name == 'TurnOff' else 'ON'
         correlation_token = request['directive']['header']['correlationToken']
 
@@ -111,18 +122,35 @@ def lambda_handler(request, context):
     if namespace == 'Alexa.BrightnessController':
         # Note: This sample always returns a success response for either a request to TurnOff or TurnOn
         endpoint_id = request['directive']['endpoint']['endpointId']
-        power_state_value = 'OFF' if name == 'TurnOff' else 'ON'
+        if name == 'SetBrightness':
+            percentage = request['directive']['payload']['brightness']
         correlation_token = request['directive']['header']['correlationToken']
-
         # Check for an error when setting the state
-        state_set = set_device_state(endpoint_id=endpoint_id, state='powerState', value=power_state_value)
+        state_set = set_device_percentage(endpoint_id=endpoint_id, state='brightness', percentage=percentage)
         if not state_set:
             return AlexaResponse(
                 name='ErrorResponse',
                 payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
 
         apcr = AlexaResponse(correlation_token=correlation_token)
-        apcr.add_context_property(namespace='Alexa.PowerController', name='powerState', value=power_state_value)
+        apcr.add_context_property(namespace='Alexa.BrightnessController', name='brightness', value=percentage)
+        return send_response(apcr.get())
+
+    if namespace == 'Alexa.ModeController':
+        # Note: This sample always returns a success response for either a request to TurnOff or TurnOn
+        endpoint_id = request['directive']['endpoint']['endpointId']
+        if name == 'SetMode':
+            mode = request['directive']['payload']['mode']
+        correlation_token = request['directive']['header']['correlationToken']
+        # Check for an error when setting the state
+        mode_set = set_device_mode(endpoint_id=endpoint_id, state='mode', mode=mode)
+        if not mode_set:
+            return AlexaResponse(
+                name='ErrorResponse',
+                payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
+
+        apcr = AlexaResponse(correlation_token=correlation_token)
+        apcr.add_context_property(namespace='Alexa.ModeController', name='mode', value=mode)
         return send_response(apcr.get())
 
 def on_connect(client, userdata, flags, rc): 
@@ -170,11 +198,12 @@ def set_device_state(endpoint_id, state, value):
     client= paho.Client()
     client.username_pw_set('', '')
     client.connect('', 1883)
-    endpoint_clean = endpoint_id.replace("/", ".").replace("status", "command")
+    endpoint_output = endpoint_id.replace(".", "/").replace("status", "command") + "/present-value"
     setvalue = "0"
     if value == "ON":
         setvalue = "100"
-    result = client.publish("endpoint_clean", setvalue)
+    print(endpoint_output)
+    result = client.publish(endpoint_output, setvalue)
     status = result[0]
     if status == 0:
         return True
@@ -185,8 +214,27 @@ def set_device_percentage(endpoint_id, state, percentage):
     client= paho.Client()
     client.username_pw_set('', '')
     client.connect('', 1883)
-    endpoint_clean = endpoint_id.replace("/", ".").replace("status", "command")
-    result = client.publish("endpoint_clean", percentage)
+    endpoint_clean = endpoint_id.replace(".", "/").replace("status", "command") + "/present-value"
+    percentage_str =  str(percentage)
+    print("percentage: " + percentage_str)
+    result = client.publish(endpoint_clean, percentage_str)
+    status = result[0]
+    if status == 0:
+        return True
+    else:
+        return False
+
+def set_device_mode(endpoint_id, state, mode):
+    client= paho.Client()
+    client.username_pw_set('', '')
+    client.connect('', 1883)
+    endpoint_clean = endpoint_id.replace(".", "/").replace("status", "command") + "/present-value"
+    mode_output = "Stop"
+    if mode == "Position.Up":
+        mode_output = 1
+    elif mode == "Position.Down":
+        mode_output = 2
+    result = client.publish(endpoint_clean, mode_output)
     status = result[0]
     if status == 0:
         return True
