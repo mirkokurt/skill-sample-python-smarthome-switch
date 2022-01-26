@@ -75,6 +75,9 @@ def lambda_handler(request, context):
             capability_alexa_brightnesscontroller = adr.create_payload_endpoint_capability(
                 interface='Alexa.BrightnessController',
                 supported=[{'name': 'brightness'}])
+            capability_alexa_percentagecontroller = adr.create_payload_endpoint_capability(
+                interface='Alexa.PercentageController',
+                supported=[{'name': 'percentage'}])
             capability_alexa_modecontroller = adr.create_payload_endpoint_capability(
                 interface='Alexa.ModeController',
                 supported=[{'name': 'mode'}],
@@ -89,6 +92,9 @@ def lambda_handler(request, context):
                 elif value['type'] == 'analog-output':
                     capab=[capability_alexa, capability_alexa_powercontroller, capability_alexa_brightnesscontroller]
                     display_cat = ['LIGHT']
+                    # Generic version: Uncomment the following lines (and comment the previous two lines) in order to have generic percentage controllers and not lights
+                    #capab=[capability_alexa, capability_alexa_powercontroller, capability_alexa_percentagecontroller]
+                    #display_cat = ['OTHER']               
                 elif value['type'] == 'multi-state-output':
                     capab=[capability_alexa, capability_alexa_modecontroller]
                     display_cat = ["INTERIOR_BLIND"]
@@ -104,7 +110,7 @@ def lambda_handler(request, context):
     if namespace == 'Alexa.PowerController':
         # Note: This sample always returns a success response for either a request to TurnOff or TurnOn
         endpoint_id = request['directive']['endpoint']['endpointId']
-        print(endpoint_id)
+        #print(endpoint_id)
         power_state_value = 'OFF' if name == 'TurnOff' else 'ON'
         correlation_token = request['directive']['header']['correlationToken']
 
@@ -118,12 +124,25 @@ def lambda_handler(request, context):
         apcr = AlexaResponse(correlation_token=correlation_token)
         apcr.add_context_property(namespace='Alexa.PowerController', name='powerState', value=power_state_value)
         return send_response(apcr.get())
-        
+
     if namespace == 'Alexa.BrightnessController':
         # Note: This sample always returns a success response for either a request to TurnOff or TurnOn
         endpoint_id = request['directive']['endpoint']['endpointId']
         if name == 'SetBrightness':
             percentage = request['directive']['payload']['brightness']
+        correlation_token = request['directive']['header']['correlationToken']
+        # Check for an error when setting the state
+        state_set = set_device_percentage(endpoint_id=endpoint_id, state='brightness', percentage=percentage)
+        if not state_set:
+            return AlexaResponse(
+                name='ErrorResponse',
+                payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
+        
+    if namespace == 'Alexa.PercentageController':
+        # Note: This sample always returns a success response for either a request to TurnOff or TurnOn
+        endpoint_id = request['directive']['endpoint']['endpointId']
+        if name == 'SetPercentage':
+            percentage = request['directive']['payload']['percentage']
         correlation_token = request['directive']['header']['correlationToken']
         # Check for an error when setting the state
         state_set = set_device_percentage(endpoint_id=endpoint_id, state='brightness', percentage=percentage)
@@ -154,7 +173,8 @@ def lambda_handler(request, context):
         return send_response(apcr.get())
 
 def on_connect(client, userdata, flags, rc): 
-    #print("Connected with result code {0}".format(str(rc)))  
+    #print("Connected with result code {0}".format(str(rc)))
+    # Change here the serial of the target device  
     client.subscribe("sauter/ecos504/411000573341/status/#")
 
 def on_message(client, userdata, msg): 
@@ -202,7 +222,7 @@ def set_device_state(endpoint_id, state, value):
     setvalue = "0"
     if value == "ON":
         setvalue = "100"
-    print(endpoint_output)
+    #print(endpoint_output)
     result = client.publish(endpoint_output, setvalue)
     status = result[0]
     if status == 0:
@@ -216,7 +236,7 @@ def set_device_percentage(endpoint_id, state, percentage):
     client.connect('', 1883)
     endpoint_clean = endpoint_id.replace(".", "/").replace("status", "command") + "/present-value"
     percentage_str =  str(percentage)
-    print("percentage: " + percentage_str)
+    #print("percentage: " + percentage_str)
     result = client.publish(endpoint_clean, percentage_str)
     status = result[0]
     if status == 0:
@@ -229,11 +249,11 @@ def set_device_mode(endpoint_id, state, mode):
     client.username_pw_set('', '')
     client.connect('', 1883)
     endpoint_clean = endpoint_id.replace(".", "/").replace("status", "command") + "/present-value"
-    mode_output = "Stop"
+    mode_output = 1
     if mode == "Position.Up":
-        mode_output = 1
-    elif mode == "Position.Down":
         mode_output = 2
+    elif mode == "Position.Down":
+        mode_output = 3
     result = client.publish(endpoint_clean, mode_output)
     status = result[0]
     if status == 0:
@@ -247,7 +267,7 @@ def set_device_state_unused(endpoint_id, state, value):
         TableName='SampleSmartHome',
         Key={'ItemId': {'S': endpoint_id}},
         AttributeUpdates={attribute_key: {'Action': 'PUT', 'Value': {'S': value}}})
-    print(response)
+    #print(response)
     if response['ResponseMetadata']['HTTPStatusCode'] == 200:
         return True
     else:
