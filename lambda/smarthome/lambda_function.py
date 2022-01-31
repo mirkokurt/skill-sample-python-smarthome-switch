@@ -87,21 +87,26 @@ def lambda_handler(request, context):
                     continue
                 capab = []
                 display_cat = ['SWITCH']
+                descr = "Generic device"
                 if value['type'] == 'binary-output':
                     capab=[capability_alexa, capability_alexa_powercontroller]
+                    descr = "ON-OFF device"
                 elif value['type'] == 'analog-output':
                     capab=[capability_alexa, capability_alexa_powercontroller, capability_alexa_brightnesscontroller]
                     display_cat = ['LIGHT']
+                    descr = "Lighting device"
                     # Generic version: Uncomment the following lines (and comment the previous two lines) in order to have generic percentage controllers and not lights
                     #capab=[capability_alexa, capability_alexa_powercontroller, capability_alexa_percentagecontroller]
-                    #display_cat = ['OTHER']               
+                    #display_cat = ['OTHER'] 
+                    #descr = "Dimmerable device"              
                 elif value['type'] == 'multi-state-output':
                     capab=[capability_alexa, capability_alexa_modecontroller]
                     display_cat = ["INTERIOR_BLIND"]
+                    descr = "Multi state device"
                 adr.add_payload_endpoint(
                     display_categories=display_cat,
                     friendly_name=str(value['properties']['description']).replace("b", "").replace("'", ""),
-                    description="test",
+                    description=descr,
                     manufacturer_name="Sauter",
                     endpoint_id= key.replace("/", "."),
                     capabilities=capab)
