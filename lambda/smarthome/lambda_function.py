@@ -22,7 +22,7 @@ aws_dynamodb = boto3.client('dynamodb')
 
 objs = {}
 read_state_endpoint = ""
-read_state_value = ""
+read_state_value = -1
 
 def lambda_handler(request, context):
 
@@ -96,7 +96,7 @@ def lambda_handler(request, context):
                 descript = str(value['properties']['description'])
                 if descript.find("[ALEXA.ON.OFF]") == -1 and descript.find("[ALEXA.LUCE]") == -1 and descript.find("[ALEXA.TENDA]") == -1 and descript.find("[ALEXA.TEMP]") == -1 and descript.find("[ALEXA.SETPOINT]") == -1:
                     continue
-                print(descript)
+                #print(descript)
                 capab = []
                 display_cat = ['SWITCH']
                 if descript.find("[ALEXA.ON.OFF]") != -1:
@@ -119,8 +119,36 @@ def lambda_handler(request, context):
                     description="test",
                     manufacturer_name="Sauter",
                     endpoint_id= key.replace("/", "."),
-                    capabilities=capab)
+                    capabilities=capab,
+                    retrievable=True)
             return send_response(adr.get())
+
+    if namespace == 'Alexa':
+        if name == 'ReportState':
+            endpoint_id = request['directive']['endpoint']['endpointId']
+            correlation_token = request['directive']['header']['correlationToken']
+
+            # Check for an error when setting the state
+            state_value = read_state(endpoint_id=endpoint_id, state=name)
+            if state_value == -1:
+                return AlexaResponse(
+                    name='ErrorResponse',
+                    payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
+
+            apcr = AlexaResponse(correlation_token=correlation_token, name='StateReport')
+            onoff_state = 'OFF'
+            if state_value != 0.0:
+                onoff_state = 'ON'
+            apcr.add_context_property(namespace='Alexa.PowerController', name='powerState', value=onoff_state)
+            apcr.add_context_property(namespace='Alexa.BrightnessController', name='brightness', value=state_value)
+            temp_value = {
+                'value':state_value,
+                'scale':'CELSIUS'
+            }
+            apcr.add_context_property(namespace='Alexa.TemperatureSensor', name='temperature', value=temp_value)
+            apcr.add_context_property(namespace='Alexa.ThermostatController', name='targetSetpoint', value=temp_value)
+            apcr.add_context_property(namespace='Alexa.EndpointHealth', name='connectivity', value='OK')
+            return send_response(apcr.get())
 
     if namespace == 'Alexa.PowerController':
         # Note: This sample always returns a success response for either a request to TurnOff or TurnOn
@@ -139,26 +167,8 @@ def lambda_handler(request, context):
         apcr = AlexaResponse(correlation_token=correlation_token)
         apcr.add_context_property(namespace='Alexa.PowerController', name='powerState', value=power_state_value)
         return send_response(apcr.get())
-
-    if namespace == 'Alexa':
-        if name == 'StateReport':
-            endpoint_id = request['directive']['endpoint']['endpointId']
-            correlation_token = request['directive']['header']['correlationToken']
-            state_name = request['directive']['context']['properties']['name']
-
-            # Check for an error when setting the state
-            state_value = read_state(endpoint_id=endpoint_id, state=state_name)
-            if not state_value:
-                return AlexaResponse(
-                    name='ErrorResponse',
-                    payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
-
-            apcr = AlexaResponse(correlation_token=correlation_token)
-            apcr.add_context_property(namespace='Alexa.PowerController', name=state_name, value=state_value)
-            return send_response(apcr.get())
-
+        
     if namespace == 'Alexa.BrightnessController':
-        print(request)
         # Note: This sample always returns a success response for either a request to TurnOff or TurnOn
         endpoint_id = request['directive']['endpoint']['endpointId']
         if name == 'SetBrightness':
@@ -208,6 +218,22 @@ def lambda_handler(request, context):
         apcr = AlexaResponse(correlation_token=correlation_token)
         apcr.add_context_property(namespace='Alexa.ModeController', name='mode', value=mode)
         return send_response(apcr.get())
+        
+    if namespace == 'Alexa.ThermostatController':
+        endpoint_id = request['directive']['endpoint']['endpointId']
+        if name == 'SetTargetTemperature':
+            set_point = request['directive']['payload']['targetSetpoint']
+        correlation_token = request['directive']['header']['correlationToken']
+        # Check for an error when setting the state
+        state_set = set_device_percentage(endpoint_id=endpoint_id, state='brightness', percentage=set_point['value'])
+        if not state_set:
+            return AlexaResponse(
+                name='ErrorResponse',
+                payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
+
+        apcr = AlexaResponse(correlation_token=correlation_token)
+        apcr.add_context_property(namespace='Alexa.BrightnessController', name='brightness', value=set_point['value'])
+        return send_response(apcr.get())
 
 def on_connect(client, userdata, flags, rc): 
     #print("Connected with result code {0}".format(str(rc)))  
@@ -250,12 +276,13 @@ def read_state(endpoint_id, state):
 
     def on_read_state_subscribe(client, userdata, flags, rc): 
         global read_state_endpoint 
-        client.subscribe(read_state_endpoint + '/present-value')
+        client.subscribe(read_state_endpoint)
 
     def on_read_state_message(client, userdata, msg): 
         global read_state_value
-        print("Message received-> " + msg.topic + " " + str(msg.payload))
-        read_state_value = str(msg.payload)
+        #print("Message received-> " + msg.topic + " " + str(msg.payload))
+        string_value = msg.payload.decode("utf-8")
+        read_state_value = float(string_value)
     
     client= paho.Client()
 
@@ -267,9 +294,9 @@ def read_state(endpoint_id, state):
     startscan = time.time()
     while True:
         client.loop()
-        if time.time() - startscan > 2:
-            print(read_state_value)
+        if time.time() - startscan > 0.5:
             break
+    
     return read_state_value
 
 def send_response(response):
