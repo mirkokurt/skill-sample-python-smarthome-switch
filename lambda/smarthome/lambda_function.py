@@ -82,11 +82,11 @@ def lambda_handler(request, context):
                 supported=[{'name': 'mode'}],
                 multi=True)
             capability_alexa_temperaturesensor = adr.create_payload_endpoint_capability(
-                interface='Alexa.Alexa.TemperatureSensor',
-                supported=[{'name': 'temperature'}])
+                interface='Alexa.TemperatureSensor',
+                supported=[{'name': 'temperature'}, {'name': 'targetSetpoint'}])
             capability_alexa_termostatcontroller = adr.create_payload_endpoint_capability(
                 interface='Alexa.ThermostatController',
-                supported=[{'name': 'targetSetpoint'}, {'name': 'lowerSetpoint'}, {'name': 'upperSetpoint'}],
+                supported=[{'name': 'targetSetpoint'}, {'name': 'thermostatMode'}, {'name': 'temperature'}],
                 termo=True)
             for key, value in objs.items():
                 if 'properties' not in value.keys():
@@ -146,7 +146,10 @@ def lambda_handler(request, context):
                 'scale':'CELSIUS'
             }
             apcr.add_context_property(namespace='Alexa.TemperatureSensor', name='temperature', value=temp_value)
+            apcr.add_context_property(namespace='Alexa.TemperatureSensor', name='targetSetpoint', value=temp_value)
             apcr.add_context_property(namespace='Alexa.ThermostatController', name='targetSetpoint', value=temp_value)
+            apcr.add_context_property(namespace='Alexa.ThermostatController', name='thermostatMode', value="AUTO")
+            apcr.add_context_property(namespace='Alexa.ThermostatController', name='temperature', value=temp_value)
             apcr.add_context_property(namespace='Alexa.EndpointHealth', name='connectivity', value='OK')
             return send_response(apcr.get())
 
@@ -202,38 +205,45 @@ def lambda_handler(request, context):
         apcr.add_context_property(namespace='Alexa.ModeController', name='mode', value=mode)
         return send_response(apcr.get())
         
-    if namespace == 'Alexa.ModeController':
-        # Note: This sample always returns a success response for either a request to TurnOff or TurnOn
-        endpoint_id = request['directive']['endpoint']['endpointId']
-        if name == 'SetMode':
-            mode = request['directive']['payload']['mode']
-        correlation_token = request['directive']['header']['correlationToken']
-        # Check for an error when setting the state
-        mode_set = set_device_mode(endpoint_id=endpoint_id, state='mode', mode=mode)
-        if not mode_set:
-            return AlexaResponse(
-                name='ErrorResponse',
-                payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
-
-        apcr = AlexaResponse(correlation_token=correlation_token)
-        apcr.add_context_property(namespace='Alexa.ModeController', name='mode', value=mode)
-        return send_response(apcr.get())
-        
     if namespace == 'Alexa.ThermostatController':
         endpoint_id = request['directive']['endpoint']['endpointId']
         if name == 'SetTargetTemperature':
             set_point = request['directive']['payload']['targetSetpoint']
-        correlation_token = request['directive']['header']['correlationToken']
-        # Check for an error when setting the state
-        state_set = set_device_percentage(endpoint_id=endpoint_id, state='brightness', percentage=set_point['value'])
-        if not state_set:
-            return AlexaResponse(
-                name='ErrorResponse',
-                payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
+            correlation_token = request['directive']['header']['correlationToken']
+            # Check for an error when setting the state
+            state_set = set_device_value(endpoint_id=endpoint_id, state='targetSetpoint', value=set_point['value'])
+            if not state_set:
+                return AlexaResponse(
+                    name='ErrorResponse',
+                    payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
+    
+            apcr = AlexaResponse(correlation_token=correlation_token)
+            apcr.add_context_property(namespace='Alexa.ThermostatController', name='targetSetpoint', value=set_point)
+            return send_response(apcr.get())
+        if name == 'AdjustTargetTemperature':
+            set_point_delta = request['directive']['payload']['targetSetpointDelta']
+            correlation_token = request['directive']['header']['correlationToken']
+            
+            # Check for an error when setting the state
+            state_value = read_state(endpoint_id=endpoint_id, state=name)
+            if state_value == -1:
+                return AlexaResponse(
+                    name='ErrorResponse',
+                    payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
+            
+            target_value = state_value + float(set_point_delta['value'])
+            print(target_value)
+            state_set = set_device_value(endpoint_id=endpoint_id, state='targetSetpoint', value=set_point['value'])
 
-        apcr = AlexaResponse(correlation_token=correlation_token)
-        apcr.add_context_property(namespace='Alexa.BrightnessController', name='brightness', value=set_point['value'])
-        return send_response(apcr.get())
+            
+            if not state_set:
+                return AlexaResponse(
+                    name='ErrorResponse',
+                    payload={'type': 'ENDPOINT_UNREACHABLE', 'message': 'Unable to reach endpoint database.'}).get()
+    
+            apcr = AlexaResponse(correlation_token=correlation_token)
+            apcr.add_context_property(namespace='Alexa.ThermostatController', name='targetSetpoint', value=set_point)
+            return send_response(apcr.get())
 
 def on_connect(client, userdata, flags, rc): 
     #print("Connected with result code {0}".format(str(rc)))  
@@ -329,6 +339,20 @@ def set_device_percentage(endpoint_id, state, percentage):
     percentage_str =  str(percentage)
     #print("percentage: " + percentage_str)
     result = client.publish(endpoint_clean, percentage_str)
+    status = result[0]
+    if status == 0:
+        return True
+    else:
+        return False
+
+def set_device_value(endpoint_id, state, value):
+    client= paho.Client()
+    client.username_pw_set('', '')
+    client.connect('', 1883)
+    endpoint_clean = endpoint_id.replace(".", "/").replace("status", "command") + "/present-value"
+    value_str =  str(value)
+    #print("percentage: " + percentage_str)
+    result = client.publish(endpoint_clean, value_str)
     status = result[0]
     if status == 0:
         return True
